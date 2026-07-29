@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Barbet — Route Planner</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --navy: #0B1F26;
+    --navy-2: #102A33;
+    --panel: #143540;
+    --aqua: #5FD6C8;
+    --lime: #D6F24A;
+    --ink: #EAF3F1;
+    --ink-dim: #9FBDBB;
+    --line: rgba(234,243,241,0.10);
+    --danger: #FF8A65;
+    --radius: 10px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; background: var(--navy); color: var(--ink);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .display{ font-family: 'Fraunces', Georgia, serif; }
+
+  .wrap{ max-width: 980px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  header{ display:flex; align-items:baseline; justify-content:space-between; gap:16px;
+    border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:22px; flex-wrap:wrap; }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand .dot{ width:10px; height:10px; border-radius:50%; background: var(--lime);
+    box-shadow: 0 0 0 3px rgba(214,242,74,0.15); }
+  h1{ font-size: 22px; margin:0; letter-spacing: -0.01em; font-weight: 600; }
+  .sub{ color: var(--ink-dim); font-size: 13px; margin-top:2px; }
+  .feed-status{ font-size:12px; color: var(--ink-dim); display:flex; align-items:center; gap:8px; }
+  .feed-status .pulse{ width:7px; height:7px; border-radius:50%; background: var(--aqua); }
+  .feed-status.err .pulse{ background: var(--danger); }
+
+  .panel{ background: var(--panel); border:1px solid var(--line); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 18px; }
+
+  .field-row{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-bottom:14px; }
+  @media (max-width:640px){ .field-row{ grid-template-columns: 1fr; } }
+  label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+    color: var(--ink-dim); margin-bottom:6px; }
+  input[type=text]{ width:100%; background: var(--navy-2); border:1px solid var(--line);
+    color: var(--ink); padding:11px 12px; border-radius:8px; font-size:14px; }
+  input[type=text]:focus{ outline:none; border-color: var(--aqua); }
+  input[type=text]::placeholder{ color: rgba(159,189,187,0.5); }
+
+  .slider-row{ display:flex; align-items:center; gap:14px; margin-bottom:6px; }
+  input[type=range]{ flex:1; accent-color: var(--aqua); }
+  .radius-val{ font-size:13px; color: var(--aqua); min-width: 90px; text-align:right; font-variant-numeric: tabular-nums; }
+
+  .mode-toggle{ display:flex; gap:8px; margin-bottom:14px; }
+  .mode-btn{ flex:1; padding:9px 10px; border-radius:8px; border:1px solid var(--line);
+    background: var(--navy-2); color: var(--ink-dim); font-size:13px; cursor:pointer; text-align:center; }
+  .mode-btn.active{ background: rgba(95,214,200,0.12); border-color: var(--aqua); color: var(--ink); }
+
+  .actions{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button.primary{ background: var(--lime); color:#0B1F26; border:none; font-weight:600;
+    padding:11px 18px; border-radius:8px; cursor:pointer; font-size:14px; }
+  button.primary:hover{ filter:brightness(1.05); }
+  button.primary:disabled{ opacity:.5; cursor:default; }
+  .hint{ font-size:12px; color: var(--ink-dim); }
+
+  .error-box{ background: rgba(255,138,101,0.1); border:1px solid rgba(255,138,101,0.35);
+    color:#FFC4B0; padding:10px 12px; border-radius:8px; font-size:13px; margin-top:12px; display:none; }
+
+  .route-summary{ display:flex; gap:18px; flex-wrap:wrap; margin-bottom:14px; font-size:13px; color: var(--ink-dim); }
+  .route-summary b{ color: var(--ink); font-weight:600; }
+
+  #mapContainer{ height: 340px; border-radius: 8px; overflow:hidden; margin-bottom:16px; display:none; border:1px solid var(--line); }
+  .leaflet-container{ background: #0e2932; }
+
+  .results-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
+  .results-head h2{ font-size:15px; margin:0; font-weight:600; }
+  .count-pill{ font-size:12px; color: var(--navy); background: var(--aqua); padding:3px 10px; border-radius:100px; font-weight:600; }
+
+  .stop{ display:grid; grid-template-columns: 28px 1fr auto; gap:14px; align-items:start;
+    padding:14px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .stop:hover{ background: rgba(95,214,200,0.05); }
+  .stop:last-child{ border-bottom:none; }
+  .stop-num{ font-family:'Fraunces', serif; font-size:15px; color: var(--ink-dim); padding-top:2px; }
+  .stop-name{ font-size:14.5px; font-weight:600; }
+  .stop-addr{ font-size:12.5px; color: var(--ink-dim); margin-top:2px; }
+  .stop-dist{ font-size:12.5px; color: var(--aqua); text-align:right; white-space:nowrap; font-variant-numeric: tabular-nums; }
+  .stop-detour{ font-size:11px; color: var(--ink-dim); text-align:right; margin-top:2px; }
+  .stop-link{ font-size:11.5px; color: var(--ink-dim); text-decoration:none; border-bottom:1px dotted var(--ink-dim); }
+  .stop-link:hover{ color: var(--aqua); border-color: var(--aqua); }
+
+  .empty{ text-align:center; padding: 40px 10px; color: var(--ink-dim); font-size:13.5px; }
+  .empty .display{ font-size:19px; color: var(--ink); display:block; margin-bottom:6px; }
+
+  footer{ margin-top:26px; font-size:11.5px; color: var(--ink-dim); line-height:1.6; }
+  footer a{ color: var(--ink-dim); }
+  .spinner{ display:inline-block; width:13px; height:13px; border-radius:50%;
+    border:2px solid rgba(234,243,241,0.25); border-top-color: var(--aqua); animation: spin .7s linear infinite; }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+
+  .stop-badge{ background:var(--lime); color:#0B1F26; border-radius:50%; width:20px; height:20px;
+    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }
+
+  /* Road Day */
+  .roadday-empty{ font-size:13px; color: var(--ink-dim); padding: 6px 2px 2px; }
+  .rd-item{ display:grid; grid-template-columns: 24px 1fr auto; gap:12px; align-items:center;
+    padding:10px 4px; border-bottom:1px solid var(--line); }
+  .rd-item:last-child{ border-bottom:none; }
+  .rd-num{ width:22px; height:22px; border-radius:50%; background: var(--aqua); color:#0B1F26;
+    font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .rd-name{ font-size:13.5px; font-weight:600; }
+  .rd-addr{ font-size:11.5px; color: var(--ink-dim); margin-top:1px; }
+  .rd-controls{ display:flex; gap:4px; align-items:center; }
+  .rd-btn{ background: var(--navy-2); border:1px solid var(--line); color: var(--ink-dim);
+    width:26px; height:26px; border-radius:6px; cursor:pointer; font-size:13px; line-height:1; }
+  .rd-btn:hover{ color: var(--ink); border-color: var(--aqua); }
+  .rd-btn:disabled{ opacity:.3; cursor:default; }
+  .rd-btn.danger:hover{ color: var(--danger); border-color: var(--danger); }
+  .rd-export{ display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+  button.secondary{ background: var(--navy-2); border:1px solid var(--line); color: var(--ink);
+    padding:9px 14px; border-radius:8px; font-size:13px; cursor:pointer; }
+  button.secondary:hover{ border-color: var(--aqua); }
+  button.secondary:disabled{ opacity:.4; cursor:default; }
+  .rd-link-box{ font-size:11.5px; color: var(--ink-dim); word-break:break-all; background: var(--navy-2);
+    border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin-top:10px; display:none; }
+  .rd-leg-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .rd-leg-label{ font-size:12px; color: var(--ink-dim); min-width:110px; }
+
+  /* Uploads */
+  .drop-zone{ border:2px dashed var(--line); border-radius:8px; padding:24px 16px; text-align:center;
+    font-size:13px; color: var(--ink-dim); cursor:pointer; transition: border-color .15s, background .15s, color .15s; }
+  .drop-zone:hover{ border-color: var(--aqua); color: var(--ink); }
+  .drop-zone.dragover{ border-color: var(--aqua); background: rgba(95,214,200,0.08); color: var(--ink); }
+  .upload-batch{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 4px;
+    border-bottom:1px solid var(--line); font-size:13px; }
+  .upload-batch:last-child{ border-bottom:none; }
+  .upload-batch-name{ font-weight:600; }
+  .upload-batch-count{ color: var(--ink-dim); font-size:12px; }
+  .toggle-row{ display:flex; align-items:center; gap:8px; font-size:13px; color: var(--ink); cursor:pointer; }
+  .toggle-row input{ accent-color: var(--aqua); width:16px; height:16px; }
+  .popup-add-btn{ margin-top:6px; background: var(--lime); color:#0B1F26; border:none; font-weight:700;
+    padding:6px 10px; border-radius:6px; cursor:pointer; font-size:12px; width:100%; }
+  .popup-add-btn.added{ background: var(--navy-2); color: var(--ink-dim); border:1px solid var(--line); }
+  .leaflet-popup-content{ font-family:'Inter', sans-serif; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <span class="dot"></span>
+      <div>
+        <h1 class="display">Route Planner</h1>
+        <div class="sub">Barbet field sales · live retailer feed</div>
+      </div>
+    </div>
+    <div id="feedStatus" class="feed-status"><span class="pulse"></span><span id="feedStatusText">Loading retailer feed…</span></div>
+  </header>
+
+  <div class="panel">
+    <div class="mode-toggle">
+      <div class="mode-btn active" data-mode="single" id="modeSingleBtn">Heading somewhere</div>
+      <div class="mode-btn" data-mode="route" id="modeRouteBtn">Driving A → B</div>
+    </div>
+
+    <div class="field-row" id="fieldRow">
+      <div id="destField">
+        <label id="destLabel">Where are you headed?</label>
+        <input type="text" id="destInput" placeholder="e.g. Bancroft, ON — or a store name">
+      </div>
+      <div id="startField" style="display:none;">
+        <label>Starting from</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="startInput" placeholder="e.g. Toronto, ON" style="flex:1;">
+          <button type="button" class="rd-btn" id="useLocationBtn" title="Use my current location" style="width:auto; padding:0 10px; white-space:nowrap;">📍 Use my location</button>
+        </div>
+      </div>
+    </div>
+
+    <label style="margin-top:2px;">Keyword filter <span style="text-transform:none;color:var(--ink-dim);">(optional — e.g. "Metro", "Healthy Planet")</span></label>
+    <input type="text" id="keywordInput" placeholder="Leave blank to include every account type" style="margin-bottom:16px;">
+
+    <label id="radiusLabel">Reasonable detour (driving)</label>
+    <div class="slider-row">
+      <input type="number" id="radiusSlider" min="0" max="100" value="25" step="1" style="width:90px; background: var(--navy-2); border:1px solid var(--line); color: var(--ink); padding:9px 10px; border-radius:8px; font-size:14px;">
+      <span class="radius-val" id="radiusVal">km (0–100)</span>
+    </div>
+
+    <div class="actions" style="margin-top:12px;">
+      <button class="primary" id="goBtn" disabled>Find accounts</button>
+      <span class="hint" id="goHint">Waiting on the retailer feed…</span>
+    </div>
+    <div class="error-box" id="errorBox"></div>
+  </div>
+
+  <div id="mapContainer"></div>
+
+  <div class="panel" id="uploadsPanel">
+    <div class="results-head">
+      <h2 class="display" style="font-size:17px;">Uploaded Accounts</h2>
+      <span style="display:flex; align-items:center; gap:10px;">
+        <span id="syncStatus" class="hint"></span>
+        <span class="count-pill" id="uploadCount">0</span>
+      </span>
+    </div>
+    <div id="dropZone" class="drop-zone">
+      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" style="display:none;" multiple>
+      Drag & drop a customer list here (CSV or Excel), or click to browse. The entire file is processed — no row limit.<br>
+      <span style="font-size:11.5px;">Looks for Name, Postal Code or City (used to place pins quickly), and Latitude/Longitude if you have them (fastest of all). Run a search after uploading to see nearby matches plotted on the map, alongside your retailer accounts.</span>
+    </div>
+    <div id="uploadProgress" class="hint" style="display:none; margin-top:10px;"></div>
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <input type="text" id="manualLocationInput" placeholder="Type a location or address not on the map yet…" style="flex:1;">
+      <button class="secondary" id="manualLocationBtn">Add</button>
+    </div>
+    <div id="uploadBatchList" style="margin-top:6px;"></div>
+    <div class="rd-export" style="margin-top:14px;">
+      <button class="secondary" id="uploadsToggleAllBtn" disabled>Toggle all on/off</button>
+      <button class="secondary" id="uploadsClearBtn" disabled>Clear all uploads</button>
+    </div>
+  </div>
+
+  <div class="panel" id="resultsPanel" style="display:none;">
+    <div class="results-head">
+      <h2 id="resultsTitle">Stops along the way</h2>
+      <span class="count-pill" id="resultCount">0</span>
+    </div>
+    <div class="route-summary" id="routeSummary" style="display:none;"></div>
+    <div id="resultsList"></div>
+  </div>
+
+  <div class="panel" id="emptyPanel">
+    <div class="empty">
+      <span class="display">Nothing plotted yet</span>
+      Tell it where you're going, and it'll pull every account within a reasonable driving detour — straight from Barbet's live retailer map, no re-uploading needed.
+    </div>
+  </div>
+
+  <div class="panel" id="roadDayPanel">
+    <div class="results-head">
+      <h2 class="display" style="font-size:17px;">Road Day</h2>
+      <span class="count-pill" id="rdCount">0</span>
+    </div>
+    <div class="route-summary" id="rdTotals" style="display:none;"></div>
+    <div id="rdList"></div>
+    <div id="rdEmpty" class="roadday-empty">Click any account above (list or map pin) and hit "Add to Road Day" to start building today's run — order reflects the sequence you add them in.</div>
+    <div class="rd-export">
+      <button class="secondary" id="rdOptimizeBtn" disabled>Optimize route ↻</button>
+      <button class="secondary" id="rdClearBtn" disabled>Clear Road Day</button>
+    </div>
+    <div id="rdOptimizeNote" class="hint" style="display:none; margin-top:8px;"></div>
+    <div id="rdLegsContainer" style="margin-top:14px;"></div>
+  </div>
+
+  <footer>
+    Retailer data pulled live from Barbet's public store locator feed on every search — this tool never needs manual updates, only the map itself does.
+    Driving distances and the plotted route come from OSRM's public routing service. Candidates are shortlisted by straight-line distance first (to keep things fast), then re-ranked by real driving distance — so the very edge of a wide radius may occasionally miss a store whose driving route loops back in range. Widen the radius slightly if a known account seems to be missing.
+    Uploaded accounts without their own latitude/longitude are placed in two stages: a fast neighbourhood-level guess (postal FSA or city) decides whether they're in range at all, then only the ones that actually land within your detour get a follow-up lookup on the full postal code/address for an exact pin — so precision cost is only ever paid for accounts that matter to the current search. Add lat/long columns to your file to skip both steps entirely.
+  </footer>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+  const STORE_FEED_URL = "https://storemapper-herokuapp-com.global.ssl.fastly.net/api/users/13697/stores.js";
+  const OSRM_BASE = "https://router.project-osrm.org";
+  const MAX_CANDIDATES = 150; // safety ceiling + speed balance (each extra candidate costs a bit of load time)
+  const ROAD_DAY_KEY = 'barbet_road_day_v1';
+  const UPLOADS_KEY = 'barbet_uploads_v1';
+  const MAX_PER_LEG = 9; // Google Maps links get unreliable past ~9 total locations in one link
+  const COLOR_FEED = '#22C55E';   // green — live retailer feed
+  const COLOR_UPLOAD = '#FACC15'; // yellow — uploaded accounts
+
+  // ---- Shared storage (Supabase) ----------------------------------------------------------
+  // Fill these in once you've created a free project at supabase.com — until then, the tool
+  // works exactly as it does today (saved to this browser only). See README for setup steps.
+  const SUPABASE_URL = '';       // e.g. 'https://xxxxxxxx.supabase.co'
+  const SUPABASE_ANON_KEY = '';  // the "anon public" key from Project Settings → API
+  const SUPABASE_ROW_ID = 'main'; // don't change unless you know why
+
+  function supabaseConfigured(){ return !!(SUPABASE_URL && SUPABASE_ANON_KEY); }
+
+  async function fetchSharedUploads(){
+    if(!supabaseConfigured()) return null;
+    try{
+      const res = await fetch(SUPABASE_URL + '/rest/v1/shared_uploads?id=eq.' + SUPABASE_ROW_ID + '&select=data', {
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY }
+      });
+      if(!res.ok) throw new Error('status ' + res.status);
+      const rows = await res.json();
+      return (rows && rows[0] && rows[0].data) ? rows[0].data : [];
+    } catch(e){
+      console.warn('Shared uploads fetch failed, falling back to this device\'s local copy:', e);
+      return null;
+    }
+  }
+
+  async function pushSharedUploads(){
+    if(!supabaseConfigured()) return;
+    try{
+      await fetch(SUPABASE_URL + '/rest/v1/shared_uploads?id=eq.' + SUPABASE_ROW_ID, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json', 'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ data: uploadBatches })
+      });
+    } catch(e){
+      console.warn('Could not push uploads to shared storage — they\'re still saved locally on this device:', e);
+    }
+  }
+
+  let stores = [];
+  let storesById = {};
+  let roadDay = loadRoadDay();
+  let markersById = {}; // search-result account id -> current Leaflet marker (cleared each search)
+  let uploadMarkersById = {}; // uploaded account id -> current Leaflet marker (persistent across searches)
+  let gpsStart = null; // { lat, lng, label } set when "Use my location" succeeds
+  let uploadBatches = loadUploads();
+  let allAccountsById = {}; // feed + upload accounts combined, rebuilt whenever either changes
+
+  function loadUploads(){
+    try{ const raw = localStorage.getItem(UPLOADS_KEY); return raw ? JSON.parse(raw) : []; } catch(e){ return []; }
+  }
+  function saveUploads(){
+    try{ localStorage.setItem(UPLOADS_KEY, JSON.stringify(uploadBatches)); } catch(e){ /* ignore */ }
+    pushSharedUploads(); // fire-and-forget — never blocks the UI, and localStorage above already has it saved either way
+  }
+  function rebuildAllAccountsById(){
+    allAccountsById = { ...storesById };
+    uploadBatches.forEach(batch => batch.accounts.forEach(a => { allAccountsById[a.id] = a; }));
+  }
+
+  function loadRoadDay(){
+    try{
+      const raw = localStorage.getItem(ROAD_DAY_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch(e){ return []; }
+  }
+  function saveRoadDay(){
+    try{ localStorage.setItem(ROAD_DAY_KEY, JSON.stringify(roadDay)); } catch(e){ /* storage unavailable, ignore */ }
+  }
+
+  const feedStatus = document.getElementById('feedStatus');
+  const feedStatusText = document.getElementById('feedStatusText');
+  const goBtn = document.getElementById('goBtn');
+  const goHint = document.getElementById('goHint');
+  const errorBox = document.getElementById('errorBox');
+
+  function showError(msg){ errorBox.style.display = 'block'; errorBox.textContent = msg; }
+  function clearError(){ errorBox.style.display = 'none'; errorBox.textContent = ''; }
+
+  // ---- Live fetch of the Storemapper feed (plain JSON, CORS-enabled) ----
+  async function loadStoreFeed(){
+    try{
+      const res = await fetch(STORE_FEED_URL, { cache: 'no-store' });
+      if(!res.ok) throw new Error('Feed responded with status ' + res.status);
+      const data = await res.json();
+      stores = (data && data.stores) ? data.stores : [];
+      stores.forEach(s => { s.source = 'feed'; s.id = String(s.id); });
+      storesById = {};
+      stores.forEach(s => { storesById[s.id] = s; });
+      rebuildAllAccountsById();
+      feedStatusText.textContent = stores.length + ' accounts loaded';
+      goBtn.disabled = false;
+      goHint.textContent = '';
+      renderRoadDayPanel();
+      renderUploadsPanel();
+    } catch(err){
+      feedStatus.classList.add('err');
+      feedStatusText.textContent = 'Feed unavailable right now';
+      goHint.textContent = 'Retailer feed failed to load — try refreshing.';
+      showError('Could not reach the live retailer feed (' + err.message + '). Refresh to retry.');
+    }
+  }
+  loadStoreFeed();
+
+  // ---- Mode toggle ----
+  let mode = 'single';
+  const modeSingleBtn = document.getElementById('modeSingleBtn');
+  const modeRouteBtn = document.getElementById('modeRouteBtn');
+  const startField = document.getElementById('startField');
+  const destLabel = document.getElementById('destLabel');
+  const radiusLabel = document.getElementById('radiusLabel');
+
+  function setMode(m){
+    mode = m;
+    modeSingleBtn.classList.toggle('active', m==='single');
+    modeRouteBtn.classList.toggle('active', m==='route');
+    startField.style.display = m==='route' ? 'block' : 'none';
+    destLabel.textContent = m==='route' ? 'Ending at' : 'Where are you headed?';
+    radiusLabel.textContent = m==='route' ? 'Reasonable driving detour' : 'Driving search radius';
+  }
+  modeSingleBtn.addEventListener('click', () => setMode('single'));
+  modeRouteBtn.addEventListener('click', () => setMode('route'));
+
+  // ---- GPS "use my location" for Starting From ----
+  const startInputEl = document.getElementById('startInput');
+  const useLocationBtn = document.getElementById('useLocationBtn');
+
+  useLocationBtn.addEventListener('click', () => {
+    if(!navigator.geolocation){ showError('Location isn\'t available in this browser.'); return; }
+    useLocationBtn.disabled = true;
+    useLocationBtn.textContent = 'Locating…';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude, lng = pos.coords.longitude;
+      let label = 'My location';
+      try{
+        const res = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng);
+        const data = await res.json();
+        if(data && data.display_name) label = data.display_name.split(',').slice(0,3).join(',');
+      } catch(e){ /* reverse geocode failed, keep generic label */ }
+      gpsStart = { lat, lng, label };
+      startInputEl.value = label;
+      useLocationBtn.disabled = false;
+      useLocationBtn.textContent = '📍 Use my location';
+    }, (err) => {
+      useLocationBtn.disabled = false;
+      useLocationBtn.textContent = '📍 Use my location';
+      showError('Couldn\'t get your location (' + err.message + '). Check location permissions for this site.');
+    }, { enableHighAccuracy: true, timeout: 10000 });
+  });
+  startInputEl.addEventListener('input', () => {
+    if(gpsStart && startInputEl.value !== gpsStart.label) gpsStart = null;
+  });
+
+  // ---- Radius slider ----
+  const radiusSlider = document.getElementById('radiusSlider');
+  const radiusVal = document.getElementById('radiusVal');
+  radiusSlider.addEventListener('change', () => {
+    let v = parseFloat(radiusSlider.value);
+    if(!isFinite(v)) v = 25;
+    v = Math.min(100, Math.max(0, v));
+    radiusSlider.value = v;
+  });
+
+  // ---- Shared fetch helper: retries once on a transient network failure, with a short backoff ----
+  async function fetchJson(url, options, label){
+    for(let attempt = 0; attempt < 2; attempt++){
+      try{
+        const res = await fetch(url, options);
+        if(!res.ok) throw new Error((label || 'Request') + ' failed (status ' + res.status + ')');
+        return await res.json();
+      } catch(err){
+        const isNetworkFailure = err instanceof TypeError || /failed to fetch/i.test(err.message || '');
+        if(isNetworkFailure && attempt === 0){
+          await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+        throw new Error(isNetworkFailure
+          ? (label || 'Request') + ' couldn\'t reach the server (network hiccup or too many requests at once) — try again.'
+          : err.message);
+      }
+    }
+  }
+
+  // ---- Geocoding (Nominatim), with a persistent cache so repeated place names (e.g. the same city or
+  // postal code showing up across many upload rows) are only ever looked up once, not once per row ----
+  const GEOCODE_CACHE_KEY = 'barbet_geocode_cache_v1';
+  let geocodeCache = loadGeocodeCache();
+  function loadGeocodeCache(){
+    try{ return JSON.parse(localStorage.getItem(GEOCODE_CACHE_KEY)) || {}; } catch(e){ return {}; }
+  }
+  function saveGeocodeCache(){
+    try{ localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(geocodeCache)); } catch(e){ /* ignore */ }
+  }
+
+  async function geocode(query, cacheKey){
+    const key = (cacheKey || query).trim().toLowerCase();
+    if(geocodeCache[key]) return geocodeCache[key]; // cache hit — no network call, no rate-limit delay
+
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ca&q=' + encodeURIComponent(query);
+    const data = await fetchJson(url, { headers: { 'Accept': 'application/json' } }, 'Geocoding');
+    if(!data || !data.length) throw new Error('Could not find that location: "' + query + '"');
+    const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), label: data[0].display_name };
+    geocodeCache[key] = result;
+    saveGeocodeCache();
+    return result;
+  }
+
+  // A bare 3-character FSA (e.g. "V6B") is too sparse for Nominatim's free-text search to reliably
+  // resolve on its own — it needs the full postal code (properly spaced) plus country context to
+  // actually find a match. This formats it accordingly.
+  function formatCanadianPostal(raw){
+    const clean = raw.replace(/\s/g, '').toUpperCase();
+    return clean.length === 6 ? clean.slice(0,3) + ' ' + clean.slice(3) : raw.trim();
+  }
+
+  // ---- Straight-line distance (used only for the pre-filter shortlist) ----
+  function haversineKm(lat1, lng1, lat2, lng2){
+    const R = 6371;
+    const dLat = (lat2-lat1) * Math.PI/180;
+    const dLng = (lng2-lng1) * Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  // ---- OSRM: real driving route between two points ----
+  async function fetchDrivingRoute(a, b){
+    const url = `${OSRM_BASE}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson&alternatives=false`;
+    const data = await fetchJson(url, undefined, 'Routing');
+    if(!data.routes || !data.routes.length) throw new Error('No driving route found between those points');
+    const r = data.routes[0];
+    return { distanceKm: r.distance/1000, durationMin: r.duration/60, coords: r.geometry.coordinates.map(c => [c[1], c[0]]) };
+  }
+
+  // ---- OSRM: driving route across many ordered waypoints (used for Road Day totals) ----
+  async function fetchMultiPointRoute(points){
+    const coordStr = points.map(p => p.lng + ',' + p.lat).join(';');
+    const url = `${OSRM_BASE}/route/v1/driving/${coordStr}?overview=false&alternatives=false`;
+    const data = await fetchJson(url, undefined, 'Routing');
+    if(!data.routes || !data.routes.length) throw new Error('No driving route found across those stops');
+    const r = data.routes[0];
+    return { distanceKm: r.distance/1000, durationMin: r.duration/60 };
+  }
+
+  // ---- OSRM: driving distance/duration matrix, one or two sources to many destinations ----
+  // Large destination lists are split into smaller chunks (run a few at a time) instead of one huge
+  // request — a single oversized table call was the likely cause of intermittent "failed to fetch" errors.
+  const TABLE_CHUNK_SIZE = 80;
+  const TABLE_CONCURRENCY = 3;
+
+  async function fetchDrivingTableChunk(sourcePoints, destChunk){
+    const allPoints = [...sourcePoints, ...destChunk];
+    const coordStr = allPoints.map(p => p.lng + ',' + p.lat).join(';');
+    const sourceIdx = sourcePoints.map((_, i) => i).join(';');
+    const destIdx = destChunk.map((_, i) => i + sourcePoints.length).join(';');
+    const url = `${OSRM_BASE}/table/v1/driving/${coordStr}?sources=${sourceIdx}&destinations=${destIdx}&annotations=distance,duration`;
+    const data = await fetchJson(url, undefined, 'Driving-distance lookup');
+    if(data.code !== 'Ok') throw new Error('Driving-distance lookup failed: ' + (data.message || data.code));
+    return data;
+  }
+
+  async function fetchDrivingTable(sourcePoints, destPoints){
+    if(destPoints.length <= TABLE_CHUNK_SIZE){
+      return fetchDrivingTableChunk(sourcePoints, destPoints);
+    }
+
+    // Split into chunks, run a few at a time (not all at once — stays polite to the shared public server),
+    // then stitch the per-chunk distance/duration rows back together in original order.
+    const chunks = [];
+    for(let i = 0; i < destPoints.length; i += TABLE_CHUNK_SIZE) chunks.push(destPoints.slice(i, i + TABLE_CHUNK_SIZE));
+
+    const merged = { distances: sourcePoints.map(() => []), durations: sourcePoints.map(() => []) };
+    for(let i = 0; i < chunks.length; i += TABLE_CONCURRENCY){
+      const batch = chunks.slice(i, i + TABLE_CONCURRENCY);
+      const results = await Promise.all(batch.map(chunk => fetchDrivingTableChunk(sourcePoints, chunk)));
+      results.forEach(data => {
+        sourcePoints.forEach((_, s) => {
+          merged.distances[s] = merged.distances[s].concat(data.distances[s]);
+          merged.durations[s] = merged.durations[s].concat(data.durations[s]);
+        });
+      });
+    }
+    return merged;
+  }
+
+  function fmtKm(km){ return km.toFixed(1) + ' km'; }
+  function fmtMin(min){ return min < 60 ? Math.round(min) + ' min' : (min/60).toFixed(1) + ' hr'; }
+
+  // ---- Map ----
+  let map, routeLayer, markerLayer, uploadLayer;
+  const mapContainer = document.getElementById('mapContainer');
+  function ensureMap(){
+    if(map) return;
+    map = L.map(mapContainer, { zoomControl: true }).setView([45, -79], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
+    }).addTo(map);
+    routeLayer = L.layerGroup().addTo(map);
+    markerLayer = L.layerGroup().addTo(map);
+    uploadLayer = L.layerGroup().addTo(map); // persistent — not cleared on every new search
+  }
+  function clearMap(){ if(routeLayer) routeLayer.clearLayers(); if(markerLayer) markerLayer.clearLayers(); markersById = {}; }
+
+  function pinIcon(bg, label, ring){
+    const borderColor = ring || '#0B1F26';
+    return L.divIcon({
+      html: `<div style="background:${bg};color:#0B1F26;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;border:2px solid ${borderColor};">${label}</div>`,
+      className: '', iconSize: [24,24], iconAnchor: [12,12]
+    });
+  }
+
+  // ---- Uploads: drop zone, parsing, geocoding, persistent map layer, panel ----
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const uploadProgress = document.getElementById('uploadProgress');
+  const uploadBatchList = document.getElementById('uploadBatchList');
+  const uploadCountEl = document.getElementById('uploadCount');
+  const uploadsToggleAllBtn = document.getElementById('uploadsToggleAllBtn');
+  const uploadsClearBtn = document.getElementById('uploadsClearBtn');
+
+  uploadsToggleAllBtn.addEventListener('click', () => {
+    const anyVisible = uploadBatches.some(b => b.visible);
+    uploadBatches.forEach(b => { b.visible = !anyVisible; }); // if any are on, turn all off; else turn all on
+    saveUploads();
+    renderUploadsPanel();
+  });
+
+  // ---- Manually add a single location by name/address ----
+  const manualLocationInput = document.getElementById('manualLocationInput');
+  const manualLocationBtn = document.getElementById('manualLocationBtn');
+  const MANUAL_BATCH_ID = 'manual-added';
+
+  async function addManualLocation(){
+    const query = manualLocationInput.value.trim();
+    if(!query) return;
+    manualLocationBtn.disabled = true;
+    manualLocationBtn.innerHTML = '<span class="spinner"></span>';
+    clearError();
+    try{
+      const geo = await geocode(query); // full-precision geocode, not FSA-limited — this is a single deliberate lookup
+      let batch = uploadBatches.find(b => b.id === MANUAL_BATCH_ID);
+      if(!batch){
+        batch = { id: MANUAL_BATCH_ID, filename: 'Manually added', count: 0, failed: 0, accounts: [], visible: true };
+        uploadBatches.push(batch);
+      }
+      batch.accounts.push({
+        id: MANUAL_BATCH_ID + '_' + Date.now(),
+        name: query, address: geo.label || '',
+        latitude: geo.lat, longitude: geo.lng, source: 'upload', batchId: MANUAL_BATCH_ID
+      });
+      batch.count = batch.accounts.length;
+      saveUploads();
+      rebuildAllAccountsById();
+      renderUploadsPanel();
+      manualLocationInput.value = '';
+    } catch(err){
+      showError('Couldn\'t find "' + query + '" — try a more specific address or a postal code.');
+    } finally {
+      manualLocationBtn.disabled = false;
+      manualLocationBtn.textContent = 'Add';
+    }
+  }
+  manualLocationBtn.addEventListener('click', addManualLocation);
+  manualLocationInput.addEventListener('keydown', e => { if(e.key === 'Enter') addManualLocation(); });
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', () => {
+    if(fileInput.files.length) handleFiles(fileInput.files);
+    fileInput.value = '';
+  });
+
+  async function handleFiles(fileList){
+    const files = Array.from(fileList);
+    for(let i = 0; i < files.length; i++){
+      await parseFile(files[i], i + 1, files.length); // sequential — keeps combined geocoding rate polite even with several files at once
+    }
+  }
+
+  function parseFile(file, fileIdx, fileTotal){
+    return new Promise((resolve) => {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if(ext === 'csv'){
+        Papa.parse(file, { header: true, skipEmptyLines: true, complete: async (res) => { await processRows(file.name, res.data, fileIdx, fileTotal); resolve(); } });
+      } else if(ext === 'xlsx' || ext === 'xls'){
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const wb = XLSX.read(e.target.result, { type: 'array' });
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          await processRows(file.name, rows, fileIdx, fileTotal);
+          resolve();
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        showError('Unsupported file type for "' + file.name + '" — please upload a CSV or Excel file.');
+        resolve();
+      }
+    });
+  }
+
+  function findField(row, candidates){
+    const keys = Object.keys(row);
+    // Pass 1: exact match on the trimmed/lowercased header
+    for(const cand of candidates){
+      const hit = keys.find(k => k.trim().toLowerCase() === cand);
+      if(hit && String(row[hit]).trim()) return String(row[hit]).trim();
+    }
+    // Pass 2: header contains the candidate word (handles "Business Name", "Client Address", etc.)
+    for(const cand of candidates){
+      const hit = keys.find(k => k.trim().toLowerCase().includes(cand));
+      if(hit && String(row[hit]).trim()) return String(row[hit]).trim();
+    }
+    return '';
+  }
+
+  function findRowName(row){
+    const direct = findField(row, ['name','account','account name','business','business name','store','store name',
+      'company','company name','customer','customer name','client','client name','retailer','retailer name',
+      'contact','contact name','location','location name']);
+    if(direct) return direct;
+    // Fallback: first column with a non-numeric, non-empty text value (common in messy exports with an unlabeled name column)
+    for(const k of Object.keys(row)){
+      const val = String(row[k]).trim();
+      if(val && isNaN(Number(val))) return val;
+    }
+    return '';
+  }
+
+  async function processRows(filename, rows, fileIdx, fileTotal){
+    if(!rows || !rows.length){ showError('"' + filename + '" had no readable rows.'); return; }
+    const workingRows = rows; // process the entire file — no row cap
+    const batchId = 'up_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+    const filePrefix = (fileTotal && fileTotal > 1) ? 'File ' + fileIdx + ' of ' + fileTotal + ' — ' : '';
+    const skippedRows = [];
+
+    // The batch is registered immediately (empty) and saved as rows complete, a little at a time —
+    // if the tab crashes, reloads, or the file turns out to have a problem partway through, whatever
+    // was already processed is kept rather than losing the entire batch.
+    const batch = { id: batchId, filename, count: 0, failed: 0, accounts: [], skippedRows: [], visible: true };
+    uploadBatches.push(batch);
+
+    let lastSaveAt = Date.now();
+    function maybeIncrementalSave(force){
+      if(force || Date.now() - lastSaveAt > 2000){ // at most every 2s — keeps saves cheap on a long file
+        batch.count = batch.accounts.length;
+        batch.failed = skippedRows.length;
+        batch.skippedRows = skippedRows;
+        saveUploads();
+        lastSaveAt = Date.now();
+      }
+    }
+
+    uploadProgress.style.display = 'block';
+
+    try{
+      // Quick upfront estimate: count rows that will actually need a network geocode call (no lat/lng,
+      // and not already in the cache) so the wait time isn't a mystery on a big file. This count keeps
+      // ticking down in the progress line below as lookups complete, rather than only flashing once.
+      const pendingQueries = new Set();
+      workingRows.forEach(row => {
+        try{
+          const latField = findField(row, ['lat','latitude']);
+          const lngField = findField(row, ['lng','long','longitude']);
+          if(isFinite(parseFloat(latField)) && isFinite(parseFloat(lngField))) return;
+          const postal = findField(row, ['postal code','postal','zip code','zip','postcode']);
+          const fsa = postal ? postal.replace(/\s/g,'').slice(0,3).toUpperCase() : '';
+          const city = findField(row, ['city','town']);
+          const province = findField(row, ['province','state']);
+          const address = findField(row, ['address','street','street address']);
+          const q = fsa || [city, province].filter(Boolean).join(', ') || [address, city, province].filter(Boolean).join(', ');
+          if(q && !geocodeCache[q.trim().toLowerCase()]) pendingQueries.add(q.trim().toLowerCase());
+        } catch(e){ /* a single malformed row here just doesn't count toward the estimate */ }
+      });
+      let remainingLookups = pendingQueries.size;
+      const showEstimate = remainingLookups > 3;
+      if(showEstimate){
+        uploadProgress.textContent = filePrefix + filename + ' — ' + workingRows.length + ' rows, ' + remainingLookups + ' new locations to look up (~' + Math.round(remainingLookups * 1.1) + 's)…';
+        await new Promise(r => setTimeout(r, 900)); // give the upfront estimate a real moment on screen before row-by-row status takes over
+      }
+
+      for(let i = 0; i < workingRows.length; i++){
+        try{
+          const row = workingRows[i];
+          const name = findRowName(row) || 'Unnamed account';
+          const address = findField(row, ['address','street','street address']);
+          const city = findField(row, ['city','town']);
+          const province = findField(row, ['province','state']);
+          const postal = findField(row, ['postal code','postal','zip code','zip','postcode']);
+          const latField = findField(row, ['lat','latitude']);
+          const lngField = findField(row, ['lng','long','longitude']);
+
+          const remainingSuffix = showEstimate ? (' — ' + remainingLookups + ' new lookups left, ~' + Math.round(remainingLookups * 1.1) + 's') : '';
+          uploadProgress.textContent = filePrefix + filename + ' — row ' + (i+1) + ' of ' + workingRows.length + remainingSuffix + '…';
+
+          let lat = parseFloat(latField), lng = parseFloat(lngField);
+          // Sanity-check any lat/long already in the file — a swapped column or stray value can silently
+          // place a pin in the ocean; if it's outside a rough Canada bounding box, treat it as missing
+          // and fall through to geocoding instead of trusting a bad number.
+          const looksLikeCanada = isFinite(lat) && isFinite(lng) && lat > 40 && lat < 85 && lng > -142 && lng < -50;
+          if(isFinite(lat) && isFinite(lng) && !looksLikeCanada){ lat = NaN; lng = NaN; }
+
+          let precise = true;
+          let preciseQuery = '';
+          if(!(isFinite(lat) && isFinite(lng))){
+            // Stage 1 (fast, cached): a bare FSA (first 3 characters, e.g. "M4K") is too sparse for the
+            // geocoder's free-text search to reliably resolve on its own, so the actual network query uses
+            // the full postal code (properly formatted) plus province/country context — but the RESULT is
+            // cached under just the FSA, so every later row sharing that neighbourhood reuses it instantly
+            // without a new network call. Falls back to city, then full address, if there's no postal code.
+            const fsa = postal ? postal.replace(/\s/g,'').slice(0,3).toUpperCase() : '';
+            const geoQuery = postal
+              ? [formatCanadianPostal(postal), province, 'Canada'].filter(Boolean).join(', ')
+              : [city, province, 'Canada'].filter(Boolean).join(', ') || [address, city, province, 'Canada'].filter(Boolean).join(', ');
+            const cacheKey = fsa || geoQuery;
+            if(!geoQuery){ skippedRows.push({ row: i+1, name, reason: 'No address, postal code, or city to place it' }); maybeIncrementalSave(); continue; }
+            const wasCached = !!geocodeCache[cacheKey.trim().toLowerCase()];
+            try{
+              const geo = await geocode(geoQuery, cacheKey);
+              lat = geo.lat; lng = geo.lng;
+              if(!wasCached){
+                remainingLookups = Math.max(0, remainingLookups - 1);
+                await new Promise(r => setTimeout(r, 1100)); // respect Nominatim's ~1 req/sec usage policy — only needed on an actual network call
+              }
+            } catch(e){ if(!wasCached) remainingLookups = Math.max(0, remainingLookups - 1); skippedRows.push({ row: i+1, name, reason: 'Could not geocode "' + geoQuery + '"' }); maybeIncrementalSave(); continue; }
+
+            // Stage 2 happens later, on demand: only accounts that actually land within a search's detour
+            // radius get a follow-up lookup on the full postal code/address for a precise pin position —
+            // see refineUploadedPrecision(), called from runSearch. Everything outside range never pays that cost.
+            precise = false;
+            preciseQuery = (postal || address) ? [postal || address, city, province].filter(Boolean).join(', ') : '';
+            if(!preciseQuery) precise = true; // nothing more precise to look up than what we already used
+          }
+
+          batch.accounts.push({
+            id: batchId + '_' + i,
+            name, address: [address, city].filter(Boolean).join(', '),
+            latitude: lat, longitude: lng, source: 'upload', batchId, precise, preciseQuery
+          });
+          maybeIncrementalSave();
+        } catch(rowErr){
+          // A single unexpected row error (bad data shape, unexpected type, etc.) never kills the batch —
+          // it's logged and the loop moves on, which matters most on a file with a thousand rows.
+          skippedRows.push({ row: i+1, name: '(unreadable row)', reason: rowErr.message || 'Unexpected error reading this row' });
+          maybeIncrementalSave();
+        }
+      }
+    } catch(batchErr){
+      showError('"' + filename + '" hit an unexpected problem partway through (' + (batchErr.message || 'unknown error') + '). Whatever finished processing before that point has been kept.');
+    } finally {
+      uploadProgress.style.display = 'none';
+      maybeIncrementalSave(true);
+      rebuildAllAccountsById();
+      renderUploadsPanel();
+      renderUploadLayer();
+    }
+
+    if(!batch.accounts.length){
+      showError('Couldn\'t place any rows from "' + filename + '" on the map — check that it has address, postal code, or latitude/longitude columns.');
+      removeUploadBatch(batchId);
+      return;
+    }
+  }
+
+  function removeUploadBatch(batchId){
+    uploadBatches = uploadBatches.filter(b => b.id !== batchId);
+    saveUploads();
+    rebuildAllAccountsById();
+    renderUploadsPanel();
+    renderUploadLayer();
+  }
+
+  uploadsClearBtn.addEventListener('click', () => {
+    if(!confirm('Remove all uploaded accounts?')) return;
+    uploadBatches = [];
+    saveUploads();
+    rebuildAllAccountsById();
+    renderUploadsPanel();
+    renderUploadLayer();
+  });
+
+  function downloadSkippedRows(batch){
+    const header = 'Row,Name,Reason\n';
+    const lines = batch.skippedRows.map(s => [s.row, '"' + (s.name||'').replace(/"/g,'""') + '"', '"' + (s.reason||'').replace(/"/g,'""') + '"'].join(','));
+    const csv = header + lines.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'skipped-rows-' + batch.filename.replace(/\.[^.]+$/, '') + '.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function renderUploadsPanel(){
+    const totalAccounts = uploadBatches.reduce((sum, b) => sum + b.count, 0);
+    uploadCountEl.textContent = totalAccounts;
+    uploadsClearBtn.disabled = uploadBatches.length === 0;
+    uploadsToggleAllBtn.disabled = uploadBatches.length === 0;
+    uploadBatchList.innerHTML = '';
+    uploadBatches.forEach(b => {
+      const row = document.createElement('div');
+      row.className = 'upload-batch';
+      const skippedCount = (b.skippedRows || []).length;
+      row.innerHTML =
+        '<label class="toggle-row" style="flex:1;"><input type="checkbox" data-act="visible" ' + (b.visible ? 'checked' : '') + '>' +
+        '<span><span class="upload-batch-name">' + escapeHtml(b.filename) + '</span> ' +
+        '<span class="upload-batch-count">' + b.count + ' account' + (b.count===1?'':'s') +
+          (skippedCount ? ', <a href="#" data-act="skipped" style="color:var(--danger); text-decoration:underline;">' + skippedCount + ' skipped — download</a>' : '') +
+        '</span></span></label>' +
+        '<button class="rd-btn danger" title="Remove this upload">×</button>';
+      row.querySelector('[data-act="visible"]').addEventListener('change', (e) => {
+        b.visible = e.target.checked;
+        saveUploads();
+      });
+      const skippedLink = row.querySelector('[data-act="skipped"]');
+      if(skippedLink) skippedLink.addEventListener('click', (e) => { e.preventDefault(); downloadSkippedRows(b); });
+      row.querySelector('button.danger').addEventListener('click', () => removeUploadBatch(b.id));
+      uploadBatchList.appendChild(row);
+    });
+  }
+
+  function renderUploadLayer(){
+    // Uploaded accounts no longer auto-plot everywhere on upload — they're merged into the same
+    // route/destination search as the retailer feed (see runSearch), so only ones actually near
+    // your current search show up, colored yellow. This keeps the map light and load times fast
+    // even with a large uploaded list. Just clear any stale pins from a previous design here.
+    if(uploadLayer) uploadLayer.clearLayers();
+    uploadMarkersById = {};
+  }
+
+  // ---- Road Day: popup content, add/remove, panel render, export ----
+  function isInRoadDay(id){ return roadDay.some(s => s.id === id); }
+
+  function buildPopupHtml(store){
+    const added = isInRoadDay(store.id);
+    const sourceTag = store.source === 'upload' ? ' <span style="color:#FACC15;font-size:11px;">· uploaded</span>' : '';
+    return '<b>' + escapeHtml(store.name) + '</b>' + sourceTag + '<br>' + escapeHtml(store.address||'') +
+      '<button class="popup-add-btn' + (added ? ' added' : '') + '" onclick="window.__toggleRoadDay(\'' + store.id + '\')">' +
+      (added ? '✓ Added — remove' : '+ Add to Road Day') + '</button>';
+  }
+
+  function refreshMarkerPopup(id){
+    const marker = markersById[id] || uploadMarkersById[id];
+    if(marker) marker.setPopupContent(buildPopupHtml(allAccountsById[id]));
+  }
+
+  window.__toggleRoadDay = function(id){
+    if(isInRoadDay(id)){
+      roadDay = roadDay.filter(s => s.id !== id);
+    } else {
+      const store = allAccountsById[id];
+      if(store){
+        const newItem = { id: store.id, name: store.name, address: store.address, latitude: store.latitude, longitude: store.longitude, directions_url: store.directions_url };
+        const endIdx = roadDay.findIndex(s => s.type === 'end');
+        if(endIdx !== -1) roadDay.splice(endIdx, 0, newItem); else roadDay.push(newItem);
+      }
+    }
+    saveRoadDay();
+    refreshMarkerPopup(id);
+    renderRoadDayPanel();
+  };
+
+  const rdList = document.getElementById('rdList');
+  const rdEmpty = document.getElementById('rdEmpty');
+  const rdCount = document.getElementById('rdCount');
+  const rdClearBtn = document.getElementById('rdClearBtn');
+  const rdOptimizeBtn = document.getElementById('rdOptimizeBtn');
+  const rdOptimizeNote = document.getElementById('rdOptimizeNote');
+  const rdLegsContainer = document.getElementById('rdLegsContainer');
+  const rdTotals = document.getElementById('rdTotals');
+
+  function moveRoadDay(idx, dir){
+    const target = idx + dir;
+    if(target < 0 || target >= roadDay.length) return;
+    const tmp = roadDay[idx]; roadDay[idx] = roadDay[target]; roadDay[target] = tmp;
+    saveRoadDay();
+    renderRoadDayPanel();
+  }
+
+  function removeRoadDayAt(idx){
+    const removed = roadDay[idx];
+    roadDay.splice(idx, 1);
+    saveRoadDay();
+    if(removed) refreshMarkerPopup(removed.id);
+    renderRoadDayPanel();
+  }
+
+  function buildGoogleMapsLegs(){
+    if(!roadDay.length) return [];
+    const pts = roadDay.map(s => ({ label: s.name, coord: s.latitude + ',' + s.longitude }));
+
+    if(pts.length === 1){
+      return [{ label: 'Location', url: 'https://www.google.com/maps/search/?api=1&query=' + pts[0].coord }];
+    }
+
+    // Chunk into legs of at most MAX_PER_LEG points; each new leg starts from the previous leg's last point,
+    // so the drive stays continuous across legs instead of skipping ground.
+    const legs = [];
+    let start = 0;
+    while(start < pts.length - 1){
+      const end = Math.min(start + MAX_PER_LEG - 1, pts.length - 1);
+      const chunk = pts.slice(start, end + 1);
+      const origin = chunk[0].coord;
+      const destination = chunk[chunk.length - 1].coord;
+      const waypoints = chunk.slice(1, -1).map(p => p.coord);
+      let url = 'https://www.google.com/maps/dir/?api=1&origin=' + origin + '&destination=' + destination + '&travelmode=driving';
+      if(waypoints.length) url += '&waypoints=' + waypoints.join('|');
+      legs.push({ label: 'Stops ' + (start+1) + '\u2013' + (end+1), url });
+      start = end;
+    }
+    return legs;
+  }
+
+  function renderRoadDayExport(){
+    const legs = buildGoogleMapsLegs();
+    rdLegsContainer.innerHTML = '';
+    if(!legs.length) return;
+
+    if(legs.length > 1){
+      const note = document.createElement('div');
+      note.className = 'hint';
+      note.style.marginBottom = '10px';
+      note.textContent = 'Split into ' + legs.length + ' links — Google Maps gets unreliable past ' + MAX_PER_LEG + ' locations in one link. Each leg picks up where the last one ends.';
+      rdLegsContainer.appendChild(note);
+    }
+
+    legs.forEach((leg, i) => {
+      const row = document.createElement('div');
+      row.className = 'rd-leg-row';
+      const labelHtml = legs.length > 1 ? '<span class="rd-leg-label">Leg ' + (i+1) + ' (' + leg.label + ')</span>' : '';
+      row.innerHTML =
+        labelHtml +
+        '<button class="secondary" data-act="copy">Copy link</button>' +
+        '<button class="secondary" data-act="open">Open</button>';
+      row.querySelector('[data-act="copy"]').addEventListener('click', async (e) => {
+        try{
+          await navigator.clipboard.writeText(leg.url);
+          e.target.textContent = 'Copied ✓';
+          setTimeout(() => { e.target.textContent = 'Copy link'; }, 1800);
+        } catch(err){
+          const box = document.createElement('div');
+          box.className = 'rd-link-box';
+          box.style.display = 'block';
+          box.textContent = leg.url;
+          row.after(box);
+        }
+      });
+      row.querySelector('[data-act="open"]').addEventListener('click', () => window.open(leg.url, '_blank', 'noopener'));
+      rdLegsContainer.appendChild(row);
+    });
+  }
+
+  function renderRoadDayPanel(){
+    rdCount.textContent = roadDay.length;
+    rdList.innerHTML = '';
+    const hasItems = roadDay.length > 0;
+    rdEmpty.style.display = hasItems ? 'none' : 'block';
+    rdClearBtn.disabled = !hasItems;
+    rdOptimizeBtn.disabled = roadDay.length < 3;
+
+    roadDay.forEach((s, i) => {
+      const isStart = s.type === 'start';
+      const isEnd = s.type === 'end';
+      const div = document.createElement('div');
+      div.className = 'rd-item';
+      div.innerHTML =
+        '<div class="rd-num"' + (isStart ? ' style="background:var(--lime);"' : isEnd ? ' style="background:var(--danger);"' : '') + '>' + (isStart ? 'A' : isEnd ? 'B' : (i+1)) + '</div>' +
+        '<div><div class="rd-name">' + escapeHtml(s.name) + (isStart ? ' <span style="color:var(--ink-dim);font-size:11px;">· starting point</span>' : isEnd ? ' <span style="color:var(--ink-dim);font-size:11px;">· destination</span>' : '') + '</div><div class="rd-addr">' + escapeHtml(s.address||'') + '</div></div>' +
+        '<div class="rd-controls">' +
+          '<button class="rd-btn" data-act="up" ' + (i===0 ? 'disabled' : '') + ' title="Move up">↑</button>' +
+          '<button class="rd-btn" data-act="down" ' + (i===roadDay.length-1 ? 'disabled' : '') + ' title="Move down">↓</button>' +
+          '<button class="rd-btn danger" data-act="remove" title="Remove">×</button>' +
+        '</div>';
+      div.querySelector('[data-act="up"]').addEventListener('click', () => moveRoadDay(i, -1));
+      div.querySelector('[data-act="down"]').addEventListener('click', () => moveRoadDay(i, 1));
+      div.querySelector('[data-act="remove"]').addEventListener('click', () => removeRoadDayAt(i));
+      rdList.appendChild(div);
+    });
+
+    renderRoadDayExport();
+    computeAndRenderRoadDayTotals();
+  }
+
+  // ---- Road Day totals (real driving distance/time across the whole ordered list) ----
+  let totalsRequestId = 0;
+  async function computeAndRenderRoadDayTotals(){
+    const myRequest = ++totalsRequestId;
+    if(roadDay.length < 2){ rdTotals.style.display = 'none'; return; }
+    rdTotals.style.display = 'flex';
+    rdTotals.innerHTML = '<span><span class="spinner"></span> calculating total drive…</span>';
+    try{
+      const points = roadDay.map(s => ({ lat: s.latitude, lng: s.longitude }));
+      const totals = await fetchMultiPointRoute(points);
+      if(myRequest !== totalsRequestId) return; // a newer request superseded this one
+      rdTotals.innerHTML =
+        '<span>Total drive: <b>' + fmtKm(totals.distanceKm) + '</b></span>' +
+        '<span>Total time: <b>' + fmtMin(totals.durationMin) + '</b></span>' +
+        '<span>Stops: <b>' + roadDay.length + '</b></span>';
+    } catch(err){
+      if(myRequest !== totalsRequestId) return;
+      rdTotals.innerHTML = '<span>Couldn\'t calculate total drive right now.</span>';
+    }
+  }
+
+  // ---- Optimize Route: reorder stops (keeping the start, and the destination if set, fixed) for shortest total drive time ----
+  rdOptimizeBtn.addEventListener('click', async () => {
+    if(roadDay.length < 3) return;
+    rdOptimizeBtn.disabled = true;
+    rdOptimizeBtn.innerHTML = '<span class="spinner"></span>';
+    rdOptimizeNote.style.display = 'none';
+    try{
+      const points = roadDay.map(s => ({ lat: s.latitude, lng: s.longitude }));
+      const table = await fetchDrivingTable(points, points); // full N x N duration/distance matrix
+      const n = points.length;
+      const dur = table.durations;
+      const hasFixedEnd = roadDay[n-1].type === 'end';
+      const lastFreeIdx = hasFixedEnd ? n - 1 : n; // exclusive upper bound for indices the optimizer may reorder
+
+      const pathCost = (order) => {
+        let total = 0;
+        for(let i = 0; i < order.length - 1; i++) total += dur[order[i]][order[i+1]];
+        return total;
+      };
+
+      // Nearest-neighbor construction, index 0 fixed as the start; the destination (if any) excluded until the end
+      const visited = new Set([0]);
+      if(hasFixedEnd) visited.add(n - 1);
+      let order = [0];
+      while(order.length < lastFreeIdx){
+        const last = order[order.length - 1];
+        let best = -1, bestCost = Infinity;
+        for(let j = 0; j < n; j++){
+          if(!visited.has(j) && dur[last][j] < bestCost){ bestCost = dur[last][j]; best = j; }
+        }
+        order.push(best);
+        visited.add(best);
+      }
+      if(hasFixedEnd) order.push(n - 1);
+
+      // 2-opt improvement (open path; start always fixed, destination fixed too when present)
+      let improved = true, iterations = 0;
+      while(improved && iterations < 300){
+        improved = false; iterations++;
+        for(let i = 1; i < lastFreeIdx - 1; i++){
+          for(let k = i + 1; k < lastFreeIdx; k++){
+            const newOrder = order.slice(0, i).concat(order.slice(i, k+1).reverse(), order.slice(k+1));
+            if(pathCost(newOrder) < pathCost(order) - 0.01){
+              order = newOrder;
+              improved = true;
+            }
+          }
+        }
+      }
+
+      const originalOrder = roadDay.map((_, i) => i);
+      const beforeMin = pathCost(originalOrder) / 60;
+      const afterMin = pathCost(order) / 60;
+      const savedMin = beforeMin - afterMin;
+
+      roadDay = order.map(i => roadDay[i]);
+      saveRoadDay();
+      renderRoadDayPanel();
+
+      rdOptimizeNote.style.display = 'block';
+      rdOptimizeNote.textContent = savedMin > 0.5
+        ? 'Optimized — saved about ' + Math.round(savedMin) + ' min versus the added order.'
+        : 'Already close to the shortest order — no meaningful change.';
+    } catch(err){
+      rdOptimizeNote.style.display = 'block';
+      rdOptimizeNote.textContent = 'Couldn\'t optimize right now (' + err.message + ').';
+    } finally {
+      rdOptimizeBtn.disabled = roadDay.length < 3;
+      rdOptimizeBtn.textContent = 'Optimize route ↻';
+    }
+  });
+
+  rdClearBtn.addEventListener('click', () => {
+    if(!confirm('Clear the entire Road Day list?')) return;
+    roadDay.forEach(s => refreshMarkerPopup(s.id));
+    roadDay = [];
+    saveRoadDay();
+    rdOptimizeNote.style.display = 'none';
+    renderRoadDayPanel();
+  });
+
+  function setRoadDayStart(start, label){
+    // Remove any previous auto-added start marker, then pin the current one at the very front.
+    roadDay = roadDay.filter(s => s.type !== 'start');
+    roadDay.unshift({ id: 'start', type: 'start', name: label || 'Starting point', address: start.label || '', latitude: start.lat, longitude: start.lng });
+    saveRoadDay();
+    renderRoadDayPanel();
+  }
+
+  function setRoadDayEnd(dest, label){
+    // Remove any previous auto-added end marker, then pin the current one at the very back.
+    roadDay = roadDay.filter(s => s.type !== 'end');
+    roadDay.push({ id: 'end', type: 'end', name: label || 'Destination', address: dest.label || '', latitude: dest.lat, longitude: dest.lng });
+    saveRoadDay();
+    renderRoadDayPanel();
+  }
+
+  // ---- Stage 2 precision refinement: only for uploaded accounts that made it into THIS search's
+  // results (i.e., already confirmed within the detour radius using the fast FSA/city position).
+  // Re-geocodes just those against the full postal code/address for an exact pin, then marks them
+  // precise permanently so future searches never redo this work for the same account. ----
+  async function refineUploadedPrecision(scoredList){
+    const toRefine = scoredList.filter(item => item.store.source === 'upload' && item.store.precise === false && item.store.preciseQuery);
+    if(!toRefine.length) return false;
+    for(const item of toRefine){
+      const wasCached = !!geocodeCache[item.store.preciseQuery.trim().toLowerCase()];
+      try{
+        const geo = await geocode(item.store.preciseQuery);
+        item.store.latitude = geo.lat;
+        item.store.longitude = geo.lng;
+        item.store.precise = true;
+        if(!wasCached) await new Promise(r => setTimeout(r, 1100)); // only the ones that actually hit the network need the pause
+      } catch(e){ /* keep the coarse position if the precise lookup fails */ }
+    }
+    saveUploads();
+    rebuildAllAccountsById();
+    return true;
+  }
+
+  // ---- Main search ----
+  const destInput = document.getElementById('destInput');
+  const startInput = document.getElementById('startInput');
+  const keywordInput = document.getElementById('keywordInput');
+  const resultsPanel = document.getElementById('resultsPanel');
+  const emptyPanel = document.getElementById('emptyPanel');
+  const resultsList = document.getElementById('resultsList');
+  const resultsTitle = document.getElementById('resultsTitle');
+  const resultCount = document.getElementById('resultCount');
+  const routeSummary = document.getElementById('routeSummary');
+
+  goBtn.addEventListener('click', runSearch);
+  destInput.addEventListener('keydown', e => { if(e.key==='Enter') runSearch(); });
+  startInput.addEventListener('keydown', e => { if(e.key==='Enter') runSearch(); });
+
+  async function runSearch(){
+    clearError();
+    const destQuery = destInput.value.trim();
+    const startQuery = startInput.value.trim();
+    const keyword = keywordInput.value.trim().toLowerCase();
+    const radiusKm = parseFloat(radiusSlider.value);
+
+    if(mode==='single' && !destQuery){ showError('Enter a destination or a retailer keyword first.'); return; }
+    if(mode==='route' && (!destQuery || !startQuery)){ showError('Route mode needs both a start and an end point.'); return; }
+
+    goBtn.disabled = true;
+    goBtn.innerHTML = '<span class="spinner"></span>';
+    routeSummary.style.display = 'none';
+    routeSummary.innerHTML = '';
+
+    try{
+      let filtered = stores.filter(s => s.latitude && s.longitude);
+      const uploaded = uploadBatches.filter(b => b.visible).flatMap(b => b.accounts).filter(a => a.latitude && a.longitude);
+      filtered = filtered.concat(uploaded);
+      if(keyword){
+        filtered = filtered.filter(s =>
+          (s.name||'').toLowerCase().includes(keyword) || (s.address||'').toLowerCase().includes(keyword)
+        );
+      }
+
+      let scored = [];
+
+      if(mode==='single'){
+        const dest = await geocode(destQuery);
+
+        // Pre-shortlist by straight-line distance (generous buffer over the driving radius), capped for OSRM
+        const shortlisted = filtered
+          .map(s => ({ store: s, straight: haversineKm(dest.lat, dest.lng, s.latitude, s.longitude) }))
+          .filter(x => x.straight <= radiusKm * 1.4)
+          .sort((a,b) => a.straight - b.straight)
+          .slice(0, MAX_CANDIDATES);
+
+        if(!shortlisted.length){ renderResults([], dest, null); return; }
+
+        const table = await fetchDrivingTable([dest], shortlisted.map(x => ({ lat: x.store.latitude, lng: x.store.longitude })));
+        scored = shortlisted
+          .map((x, i) => ({ store: x.store, distanceKm: table.distances[0][i]/1000, durationMin: table.durations[0][i]/60 }))
+          .filter(x => x.distanceKm <= radiusKm)
+          .sort((a,b) => a.distanceKm - b.distanceKm);
+
+        resultsTitle.textContent = 'Accounts near ' + destQuery;
+        renderResults(scored, dest, null);
+        if(await refineUploadedPrecision(scored)) renderResults(scored, dest, null);
+
+      } else {
+        const destPromise = geocode(destQuery);
+        const start = (gpsStart && gpsStart.label === startQuery) ? gpsStart : await geocode(startQuery);
+        const dest = await destPromise;
+        setRoadDayStart(start, startQuery);
+        setRoadDayEnd(dest, destQuery);
+        const route = await fetchDrivingRoute(start, dest);
+
+        const shortlisted = filtered
+          .map(s => ({
+            store: s,
+            straight: haversineKm(start.lat, start.lng, s.latitude, s.longitude) + haversineKm(s.latitude, s.longitude, dest.lat, dest.lng)
+          }))
+          .filter(x => (x.straight - haversineKm(start.lat, start.lng, dest.lat, dest.lng)) <= radiusKm * 1.5)
+          .sort((a,b) => a.straight - b.straight)
+          .slice(0, MAX_CANDIDATES);
+
+        if(!shortlisted.length){ renderResults([], start, dest, route); return; }
+
+        const points = shortlisted.map(x => ({ lat: x.store.latitude, lng: x.store.longitude }));
+        const table = await fetchDrivingTable([start, dest], points);
+
+        scored = shortlisted
+          .map((x, i) => {
+            const fromStart = table.distances[0][i]/1000;
+            const toDest = table.distances[1][i]/1000;
+            const detourKm = (fromStart + toDest) - route.distanceKm;
+            return { store: x.store, distanceKm: fromStart + toDest, detourKm };
+          })
+          .filter(x => x.detourKm <= radiusKm)
+          .sort((a,b) => a.detourKm - b.detourKm);
+
+        resultsTitle.textContent = startQuery + ' → ' + destQuery;
+        routeSummary.style.display = 'flex';
+        routeSummary.innerHTML =
+          '<span>Direct drive: <b>' + fmtKm(route.distanceKm) + '</b></span>' +
+          '<span>Est. time: <b>' + fmtMin(route.durationMin) + '</b></span>' +
+          '<span>Stops in range: <b>' + scored.length + '</b></span>';
+
+        renderResults(scored, start, dest, route);
+        if(await refineUploadedPrecision(scored)) renderResults(scored, start, dest, route);
+      }
+
+    } catch(err){
+      showError(err.message || 'Something went wrong finding that location.');
+      resultsPanel.style.display = 'none';
+      mapContainer.style.display = 'none';
+      emptyPanel.style.display = 'block';
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = 'Find accounts';
+    }
+  }
+
+  function renderResults(scored, start, dest, route){
+    resultCount.textContent = scored.length;
+    resultsList.innerHTML = '';
+
+    if(!scored.length){
+      resultsPanel.style.display = 'none';
+      mapContainer.style.display = 'none';
+      emptyPanel.style.display = 'block';
+      emptyPanel.querySelector('.empty').innerHTML =
+        '<span class="display">No accounts in range</span>Try widening the detour radius, or double-check the keyword filter isn\'t excluding everything.';
+      return;
+    }
+
+    emptyPanel.style.display = 'none';
+    resultsPanel.style.display = 'block';
+    mapContainer.style.display = 'block';
+    ensureMap();
+    clearMap();
+    setTimeout(() => map.invalidateSize(), 50);
+
+    const MAP_PIN_LIMIT = 10;
+    const bounds = [];
+
+    if(route && route.coords){
+      L.polyline(route.coords, { color: '#5FD6C8', weight: 4, opacity: 0.85 }).addTo(routeLayer);
+      route.coords.forEach(c => bounds.push(c));
+    }
+    if(start){
+      L.marker([start.lat, start.lng], { icon: pinIcon('#D6F24A', 'A') }).addTo(markerLayer);
+      bounds.push([start.lat, start.lng]);
+    }
+    if(dest){
+      L.marker([dest.lat, dest.lng], { icon: pinIcon('#FF8A65', dest && start ? 'B' : '★') }).addTo(markerLayer);
+      bounds.push([dest.lat, dest.lng]);
+    }
+
+    function plotMarker(item){
+      const s = item.store;
+      const added = isInRoadDay(s.id);
+      const baseColor = s.source === 'upload' ? COLOR_UPLOAD : COLOR_FEED;
+      const marker = L.marker([s.latitude, s.longitude], { icon: pinIcon(baseColor, added ? '✓' : '', added ? '#D6F24A' : '#0B1F26') }).addTo(markerLayer);
+      marker.bindPopup(buildPopupHtml(s));
+      markersById[s.id] = marker;
+      return marker;
+    }
+
+    function buildStopRow(item, i){
+      const s = item.store;
+      const added = isInRoadDay(s.id);
+      const div = document.createElement('div');
+      div.className = 'stop';
+      const distText = item.detourKm !== undefined
+        ? item.detourKm.toFixed(1) + ' km detour'
+        : item.distanceKm.toFixed(1) + ' km drive';
+      const timeText = item.durationMin !== undefined ? fmtMin(item.durationMin) : '';
+      div.innerHTML =
+        '<div class="stop-num">' + String(i+1).padStart(2,'0') + '</div>' +
+        '<div>' +
+          '<div class="stop-name">' + escapeHtml(s.name) + (added ? ' <span style="color:var(--lime);font-size:11px;">· in Road Day</span>' : '') + '</div>' +
+          '<div class="stop-addr">' + escapeHtml(s.address || '') + '</div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="stop-dist">' + distText + '</div>' +
+          '<div class="stop-detour">' + timeText + '</div>' +
+          (s.directions_url ? '<a class="stop-link" href="' + s.directions_url + '" target="_blank" rel="noopener">Directions ↗</a>' : '') +
+        '</div>';
+      div.addEventListener('click', () => {
+        const marker = markersById[s.id] || plotMarker(item); // hidden-list items get their pin created the first time they're clicked
+        map.setView([s.latitude, s.longitude], 13);
+        marker.openPopup();
+      });
+      return div;
+    }
+
+    const listed = scored.slice(0, MAP_PIN_LIMIT);
+    const overflow = scored.slice(MAP_PIN_LIMIT);
+
+    scored.forEach((item) => { plotMarker(item); bounds.push([item.store.latitude, item.store.longitude]); });
+    listed.forEach((item, i) => { resultsList.appendChild(buildStopRow(item, i)); });
+
+    if(overflow.length){
+      const details = document.createElement('details');
+      details.style.marginTop = '4px';
+      const summary = document.createElement('summary');
+      summary.style.cursor = 'pointer';
+      summary.style.fontSize = '13px';
+      summary.style.color = 'var(--ink-dim)';
+      summary.style.padding = '10px 4px';
+      summary.textContent = 'Show ' + overflow.length + ' more in the list (all are already pinned on the map)';
+      details.appendChild(summary);
+      overflow.forEach((item, j) => details.appendChild(buildStopRow(item, MAP_PIN_LIMIT + j)));
+      resultsList.appendChild(details);
+    }
+
+    if(bounds.length) map.fitBounds(bounds, { padding: [30,30] });
+  }
+
+  function escapeHtml(str){
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  rebuildAllAccountsById();
+  renderRoadDayPanel();
+  renderUploadsPanel();
+  renderUploadLayer();
+
+  const syncStatusEl = document.getElementById('syncStatus');
+  syncStatusEl.textContent = supabaseConfigured() ? '☁ Shared across all devices' : '💾 Saved on this device only';
+
+  // If shared storage is configured, prefer it over this device's local copy on load —
+  // that's what makes uploaded accounts visible from any device, not just the one that added them.
+  (async () => {
+    const shared = await fetchSharedUploads();
+    if(shared !== null){
+      uploadBatches = shared;
+      try{ localStorage.setItem(UPLOADS_KEY, JSON.stringify(uploadBatches)); } catch(e){ /* ignore */ }
+      rebuildAllAccountsById();
+      renderUploadsPanel();
+      renderUploadLayer();
+    } else if(supabaseConfigured()){
+      syncStatusEl.textContent = '⚠ Shared storage unreachable — showing this device\'s local copy';
+    }
+  })();
+})();
+</script>
+</body>
+</html>
