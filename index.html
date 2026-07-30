@@ -791,12 +791,15 @@ const SUPABASE_ANON_KEY = 'sb_publishable_jyqPD6ZwNjalOjoHEgqSgg_DSaMi1Bn';
             // the full postal code (properly formatted) plus province/country context — but the RESULT is
             // cached under just the FSA, so every later row sharing that neighbourhood reuses it instantly
             // without a new network call. Falls back to city, then full address, if there's no postal code.
-            const fsa = postal ? postal.replace(/\s/g,'').slice(0,3).toUpperCase() : '';
+      const fsa = postal ? postal.replace(/\s/g,'').slice(0,3).toUpperCase() : '';
+            const hasLocationSignal = !!(postal || city || address);
+            if(!hasLocationSignal){ skippedRows.push({ row: i+1, name, reason: 'No address, postal code, or city to place it' }); maybeIncrementalSave(); continue; }
             const geoQuery = postal
               ? [formatCanadianPostal(postal), province, 'Canada'].filter(Boolean).join(', ')
-              : [city, province, 'Canada'].filter(Boolean).join(', ') || [address, city, province, 'Canada'].filter(Boolean).join(', ');
-            const cacheKey = fsa || geoQuery;
-            if(!geoQuery){ skippedRows.push({ row: i+1, name, reason: 'No address, postal code, or city to place it' }); maybeIncrementalSave(); continue; }
+              : city
+                ? [city, province, 'Canada'].filter(Boolean).join(', ')
+                : [address, city, province, 'Canada'].filter(Boolean).join(', ');
+            const cacheKey = fsa || (city ? [city, province].filter(Boolean).join(', ') : geoQuery);
             const wasCached = !!geocodeCache[cacheKey.trim().toLowerCase()];
             try{
               const geo = await geocode(geoQuery, cacheKey);
