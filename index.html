@@ -660,17 +660,55 @@ const SUPABASE_ANON_KEY = 'sb_publishable_jyqPD6ZwNjalOjoHEgqSgg_DSaMi1Bn';
     }
   }
 
+ // Some exported spreadsheets have a title row (e.g. "BC - JN Indy Customer List") merged across
+  // the top before the real column headers — assuming row 1 is always the header row misreads the
+  // whole file in that case. This scans the first several rows and picks whichever one actually
+  // looks like real column headers (name/address/postal/etc.), wherever it happens to sit.
+  const HEADER_KEYWORDS = ['name','account','business','company','customer','client','store','retailer',
+    'contact','location','address','street','city','town','province','state','postal','zip','postcode',
+    'lat','latitude','lng','long','longitude'];
+
+  function detectHeaderRowIndex(rawRows){
+    let bestIdx = 0, bestScore = -1;
+    for(let i = 0; i < Math.min(rawRows.length, 10); i++){
+      const row = rawRows[i] || [];
+      const score = row.filter(cell => {
+        const c = String(cell || '').trim().toLowerCase();
+        return c && HEADER_KEYWORDS.some(k => c.includes(k));
+      }).length;
+      if(score > bestScore){ bestScore = score; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
+  function rowsFromRawArray(rawRows){
+    const headerIdx = detectHeaderRowIndex(rawRows);
+    const headers = (rawRows[headerIdx] || []).map(h => String(h || '').trim());
+    return rawRows.slice(headerIdx + 1)
+      .filter(r => r.some(cell => String(cell || '').trim() !== ''))
+      .map(r => {
+        const obj = {};
+        headers.forEach((h, idx) => { obj[h || ('col' + idx)] = r[idx] !== undefined ? r[idx] : ''; });
+        return obj;
+      });
+  }
+
   function parseFile(file, fileIdx, fileTotal){
     return new Promise((resolve) => {
       const ext = file.name.split('.').pop().toLowerCase();
       if(ext === 'csv'){
-        Papa.parse(file, { header: true, skipEmptyLines: true, complete: async (res) => { await processRows(file.name, res.data, fileIdx, fileTotal); resolve(); } });
+        Papa.parse(file, { header: false, skipEmptyLines: true, complete: async (res) => {
+          const rows = rowsFromRawArray(res.data);
+          await processRows(file.name, rows, fileIdx, fileTotal);
+          resolve();
+        } });
       } else if(ext === 'xlsx' || ext === 'xls'){
         const reader = new FileReader();
         reader.onload = async (e) => {
           const wb = XLSX.read(e.target.result, { type: 'array' });
           const sheet = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+          const rows = rowsFromRawArray(raw);
           await processRows(file.name, rows, fileIdx, fileTotal);
           resolve();
         };
@@ -681,6 +719,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_jyqPD6ZwNjalOjoHEgqSgg_DSaMi1Bn';
       }
     });
   }
+
 
   function findField(row, candidates){
     const keys = Object.keys(row);
