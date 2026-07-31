@@ -790,8 +790,13 @@ const SUPABASE_ANON_KEY = 'sb_publishable_jyqPD6ZwNjalOjoHEgqSgg_DSaMi1Bn';
           const city = findField(row, ['city','town']);
           const province = findField(row, ['province','state']);
           const address = findField(row, ['address','street','street address']);
-          const q = fsa || [city, province].filter(Boolean).join(', ') || [address, city, province].filter(Boolean).join(', ');
-          if(q && !geocodeCache[q.trim().toLowerCase()]) pendingQueries.add(q.trim().toLowerCase());
+          // Mirror the coarse cache key the real loop below will use (city first, then address, then postal/FSA).
+          let key = '';
+          if(city)         key = 'city:' + [city, province].filter(Boolean).join('|').toLowerCase();
+          else if(address) key = [address, city, province, 'Canada'].filter(Boolean).join(', ').toLowerCase();
+          else if(postal)  key = 'postal:' + postal.replace(/\s/g,'').toLowerCase();
+          else if(fsa)     key = 'fsa:' + fsa.toLowerCase();
+          if(key && !geocodeCache[key]) pendingQueries.add(key);
         } catch(e){ /* a single malformed row here just doesn't count toward the estimate */ }
       });
       let remainingLookups = pendingQueries.size;
@@ -825,29 +830,36 @@ const SUPABASE_ANON_KEY = 'sb_publishable_jyqPD6ZwNjalOjoHEgqSgg_DSaMi1Bn';
           let precise = true;
           let preciseQuery = '';
           if(!(isFinite(lat) && isFinite(lng))){
-            // Stage 1 (fast, cached): a bare FSA (first 3 characters, e.g. "M4K") is too sparse for the
-            // geocoder's free-text search to reliably resolve on its own, so the actual network query uses
-            // the full postal code (properly formatted) plus province/country context — but the RESULT is
-            // cached under just the FSA, so every later row sharing that neighbourhood reuses it instantly
-            // without a new network call. Falls back to city, then full address, if there's no postal code.
-      const fsa = postal ? postal.replace(/\s/g,'').slice(0,3).toUpperCase() : '';
-            const hasLocationSignal = !!(postal || city || address);
-            if(!hasLocationSignal){ skippedRows.push({ row: i+1, name, reason: 'No address, postal code, or city to place it' }); maybeIncrementalSave(); continue; }
-            const geoQuery = postal
-              ? [formatCanadianPostal(postal), province, 'Canada'].filter(Boolean).join(', ')
-              : city
-                ? [city, province, 'Canada'].filter(Boolean).join(', ')
-                : [address, city, province, 'Canada'].filter(Boolean).join(', ');
-            const cacheKey = fsa || (city ? [city, province].filter(Boolean).join(', ') : geoQuery);
-            const wasCached = !!geocodeCache[cacheKey.trim().toLowerCase()];
-            try{
-              const geo = await geocode(geoQuery, cacheKey);
-              lat = geo.lat; lng = geo.lng;
-              if(!wasCached){
-                remainingLookups = Math.max(0, remainingLookups - 1);
-                await new Promise(r => setTimeout(r, 1100)); // respect Nominatim's ~1 req/sec usage policy — only needed on an actual network call
+            // Stage 1 (fast, cached): get a coarse "is this row even in range" position without paying for a
+            // precise lookup yet. We try several place descriptions in order of how reliably the geocoder
+            // resolves them, and only skip the row if EVERY one fails — a single unresolved postal code no
+            // longer throws away a row that also has a perfectly good city or address. (Canadian FULL postal
+            // codes resolve poorly in Nominatim's free-text search because Canada Post's data is proprietary,
+            // which is exactly why we lead with city and keep the postal as a fallback, not the only attempt.)
+            const fsa = postal ? postal.replace(/\s/g,'').slice(0,3).toUpperCase() : '';
+            const coarseCandidates = [];
+            if(city)    coarseCandidates.push({ q: [city, province, 'Canada'].filter(Boolean).join(', '), key: 'city:' + [city, province].filter(Boolean).join('|').toLowerCase() });
+            if(address) coarseCandidates.push({ q: [address, city, province, 'Canada'].filter(Boolean).join(', '), key: null });
+            if(postal)  coarseCandidates.push({ q: [formatCanadianPostal(postal), province, 'Canada'].filter(Boolean).join(', '), key: 'postal:' + postal.replace(/\s/g,'').toLowerCase() });
+            if(fsa)     coarseCandidates.push({ q: [fsa, province, 'Canada'].filter(Boolean).join(', '), key: 'fsa:' + fsa.toLowerCase() });
+
+            if(!coarseCandidates.length){ skippedRows.push({ row: i+1, name, reason: 'No city, address, or postal code to place it' }); maybeIncrementalSave(); continue; }
+
+            let geo = null, spentNetworkCall = false;
+            for(const cand of coarseCandidates){
+              const cKey = (cand.key || cand.q).trim().toLowerCase();
+              const wasCached = !!geocodeCache[cKey];
+              try{
+                geo = await geocode(cand.q, cand.key || undefined);
+                if(!wasCached){ spentNetworkCall = true; await new Promise(r => setTimeout(r, 1100)); }
+                break;
+              } catch(e){
+                if(!wasCached){ spentNetworkCall = true; await new Promise(r => setTimeout(r, 1100)); }
               }
-            } catch(e){ if(!wasCached) remainingLookups = Math.max(0, remainingLookups - 1); skippedRows.push({ row: i+1, name, reason: 'Could not geocode "' + geoQuery + '"' }); maybeIncrementalSave(); continue; }
+            }
+            if(spentNetworkCall) remainingLookups = Math.max(0, remainingLookups - 1);
+            if(!geo){ skippedRows.push({ row: i+1, name, reason: 'Couldn\'t locate from city/address/postal (' + [city, postal].filter(Boolean).join(' / ') + ')' }); maybeIncrementalSave(); continue; }
+            lat = geo.lat; lng = geo.lng;
 
             // Stage 2 happens later, on demand: only accounts that actually land within a search's detour
             // radius get a follow-up lookup on the full postal code/address for a precise pin position —
@@ -881,7 +893,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_jyqPD6ZwNjalOjoHEgqSgg_DSaMi1Bn';
     }
 
     if(!batch.accounts.length){
-      showError('Couldn\'t place any rows from "' + filename + '" on the map — check that it has address, postal code, or latitude/longitude columns.');
+      showError('Couldn\'t place any rows from "' + filename + '" — every city/address/postal lookup came back empty. Your columns look fine; the free geocoder is often rate-limited or briefly unavailable, so wait a moment and re-upload. Adding Latitude/Longitude columns skips lookups entirely, and the "download" link on the skipped list shows the exact reason per row.');
       removeUploadBatch(batchId);
       return;
     }
